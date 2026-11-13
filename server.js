@@ -5,6 +5,7 @@
 // Demo mode: visitors act through a server-held TESTNET demo account (backer,
 // poster, relayer), so nobody needs a wallet. Writes are capped and rate limited.
 import express from 'express';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { waitUntil } from '@vercel/functions';
 import { view, call, toYocto, fromYocto, txUrl, EXPLORER, NETWORK } from './lib/near.js';
 import { attest, online } from './lib/tee.js';
@@ -14,6 +15,35 @@ import { ROSTER, REVIEWER_MODEL, BRAINS, brainOf } from './runner/roster.js';
 import { runSim, summarize } from './sim/engine.js';
 
 const app = express();
+
+// ---------------- NEAR AI Agent Market webhook (before the JSON parser: HMAC needs the raw body) ----------------
+// Each hire arrives here exactly once, signed: X-Market-Signature = sha256=HMAC(secret, "<timestamp>.<raw body>").
+const seenDeliveries = new Map();
+app.post('/api/market/webhook', express.raw({ type: '*/*', limit: '256kb' }), (req, res) => {
+  const secret = process.env.MARKET_WEBHOOK_SECRET;
+  if (!secret) return res.status(503).json({ error: 'webhook not configured' });
+  const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from('');
+  const ts = String(req.get('x-market-timestamp') || '');
+  const sig = String(req.get('x-market-signature') || '').replace(/^sha256=/, '');
+  if (!/^\d+$/.test(ts) || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return res.status(401).json({ error: 'stale or missing timestamp' });
+  const want = createHmac('sha256', secret).update(`${ts}.`).update(raw).digest();
+  const got = /^[0-9a-f]{64}$/i.test(sig) ? Buffer.from(sig, 'hex') : Buffer.alloc(0);
+  if (got.length !== want.length || !timingSafeEqual(got, want)) return res.status(401).json({ error: 'bad signature' });
+  const delivery = String(req.get('x-market-delivery') || '');
+  const now = Date.now();
+  for (const [k, t] of seenDeliveries) if (now - t > 3_600_000) seenDeliveries.delete(k);
+  if (delivery && seenDeliveries.has(delivery)) return res.json({ ok: true, duplicate: true });
+  if (delivery) seenDeliveries.set(delivery, now);
+  let body = {};
+  try { body = JSON.parse(raw.toString('utf8') || '{}'); } catch { return res.status(400).json({ error: 'bad json' }); }
+  const event = String(req.get('x-market-event') || body.event || body.type || '');
+  const d = body.data || body;
+  if (event === 'hire.created' && (d.assignment_id || d.assignmentId)) {
+    bg(import('./runner/market.js').then(({ startHire }) => startHire({ id: d.assignment_id || d.assignmentId, title: d.title, description: d.description, quiet: true })));
+  }
+  res.json({ ok: true, event });
+});
+
 app.use(express.json({ limit: '32kb' }));
 const IS_VERCEL = Boolean(process.env.VERCEL);
 const C = process.env.ANT_CONTRACT;
@@ -112,10 +142,11 @@ app.get("/api/sim", wrap(async () => {
 
 // ---------------- runner trigger ----------------
 let lastTick = 0;
-app.post('/api/tick', wrap(async () => {
-  if (Date.now() - lastTick < 8000) return { skipped: true };
+app.post('/api/tick', wrap(async (req) => {
+  const market = req.query.market === '1'; // only the GitHub heartbeat polls the market
+  if (!market && Date.now() - lastTick < 8000) return { skipped: true };
   lastTick = Date.now();
-  bg(tick({ quiet: true }));
+  bg(tick({ quiet: true, market }));
   return { started: true };
 }));
 

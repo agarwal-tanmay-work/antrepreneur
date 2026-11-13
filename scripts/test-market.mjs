@@ -33,7 +33,7 @@ process.env.MARKET_TOKEN = 'aat_mock_for_local_test';
 const { tick } = await import('../runner/core.js');
 const started = Date.now();
 while (!delivered && Date.now() - started < 8 * 60 * 1000) {
-  await tick({ quiet: false }).catch((e) => console.log('tick error', e.message));
+  await tick({ quiet: false, market: true }).catch((e) => console.log('tick error', e.message));
   await new Promise((r) => setTimeout(r, 8000));
 }
 server.close();

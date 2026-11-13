@@ -57,6 +57,9 @@ export async function seedRoster(opts = {}) { for (const d of ROSTER) await spaw
 const clip = (s, bytes = 1500) => { let b = Buffer.from(s, 'utf8'); if (b.length <= bytes) return s; return b.subarray(0, bytes - 3).toString('utf8').replace(/�$/, '') + '...'; };
 const workPrompt = (job) => `Job #${job.id}: ${job.title}\n\nSpecification:\n${job.spec}\n\nReply with the deliverable only, under 1200 characters.`;
 const inFlight = new Set();
+let feeCache = null;
+const hungryNoted = new Set();
+const submitFee = async () => (feeCache ||= BigInt((await view('get_config')).submit_fee));
 
 async function doWork(a, job, quiet) {
   const key = `${job.id}:${a.handle}`;
@@ -77,8 +80,21 @@ async function doWork(a, job, quiet) {
     // that explicitly ask for it (Trojan).
     const attack = (a.persona.match(/append on a new line exactly: "([^"]+)"/i) || [])[1];
     if (attack && !text.includes(attack.slice(0, 30))) text = `${clip(text, 1500 - attack.length - 2)}\n${attack}`;
-    const content = clip(text);
-    const r = await call(`${a.handle}.${C()}`, 'submit_work', { job_id: String(job.id), content, proof: compactProof(res.proof) }, { gas: SUBMIT_GAS, waitUntil: 'FINAL' });
+    // A hungry ant answers as briefly as its food allows: each answer costs the fee plus
+    // 1 yoctoNEAR*1e19 per stored byte. Spending its last food this way lets it starve
+    // honestly instead of idling just above the starvation line.
+    let proof = compactProof(res.proof);
+    const spare = Number((BigInt(a.budget) - (await submitFee())) / 10n ** 19n); // bytes of storage it can still afford
+    const room = (withProof) => spare - 220 - (withProof && proof ? proof.length : 0); // ~220 B: hash, handle, timestamps
+    let max = 1500;
+    if (room(true) < 1500) {
+      if (room(true) < 80) proof = null;
+      max = Math.min(1500, room(Boolean(proof)));
+    }
+    if (max < 40) { if (!hungryNoted.has(a.handle)) { hungryNoted.add(a.handle); emit({ kind: 'error', msg: `${a.name} is too hungry to pay for even a short answer; it sits out until someone feeds it` }, quiet); } return; }
+    hungryNoted.delete(a.handle);
+    const content = clip(text, max);
+    const r = await call(`${a.handle}.${C()}`, 'submit_work', { job_id: String(job.id), content, ...(proof ? { proof } : {}) }, { gas: SUBMIT_GAS, waitUntil: 'FINAL' });
     emit({ kind: 'submit', msg: `${a.name} answered job #${job.id} and paid for its own inference${res.proof.verified ? ' (TEE-signed answer)' : res.proof.mode === 'offline' ? ' (offline brain)' : ''}`, tx: r.hash, handle: a.handle, job: Number(job.id) }, quiet);
   } finally { inFlight.delete(key); }
 }
@@ -96,7 +112,7 @@ export async function workerTick({ quiet = false, jobs, agents } = {}) {
       if (slots <= 0 || done.has(a.handle) || !a.can_work) continue;
       if (!(await canOperate(a.handle))) continue;
       slots--;
-      tasks.push(doWork(a, job, quiet).catch((e) => emit({ kind: 'error', msg: `${a.handle} on job #${job.id}: ${e.message.slice(0, 160)}` }, quiet)));
+      tasks.push(doWork(a, job, quiet).catch((e) => /already submitted/.test(e.message) ? null : emit({ kind: 'error', msg: `${a.handle} on job #${job.id}: ${e.message.slice(0, 160)}` }, quiet)));
     }
   }
   await Promise.all(tasks);
@@ -210,7 +226,7 @@ export async function tick(opts = {}) {
   if (ticking) return ticking;
   ticking = (async () => {
     const [jobs, agents] = await Promise.all([view('list_jobs', { from_index: 0, limit: 30 }), view('list_agents', { from_index: 0, limit: 100 })]);
-    if (process.env.MARKET_TOKEN) {
+    if (opts.market && process.env.MARKET_TOKEN) { // only the heartbeat polls the market (no racing pollers)
       const { marketTick } = await import('./market.js');
       await marketTick(opts).catch((e) => emit({ kind: 'error', msg: `market: ${e.message.slice(0, 160)}` }, opts.quiet));
     }

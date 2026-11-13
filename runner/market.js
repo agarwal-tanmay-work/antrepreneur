@@ -48,6 +48,24 @@ function deliverable(job) {
   ].filter(Boolean).join('\n');
 }
 
+// one in-flight claim per assignment in this instance (webhook retries, overlapping ticks)
+const claimed = new Map();
+const jobsFor = (jobs, id) => jobs.filter((j) => j.spec.includes(marker(id))).sort((x, y) => Number(y.id) - Number(x.id));
+
+/** Post the on-chain job for a hire unless one already exists. Shared by webhook and poller. */
+export async function startHire({ id, title, description, revisionOf = null, note = '', quiet = true }) {
+  if (claimed.has(id) && Date.now() - claimed.get(id) < 120_000) return null;
+  claimed.set(id, Date.now());
+  const mine = jobsFor(await view('list_jobs', { from_index: 0, limit: 50 }), id);
+  if (mine.length && !revisionOf) return null; // another runner already posted it
+  const spec = `${String(description || title).slice(0, 1100 - note.length)}${note}\n\n${marker(id)}${revisionOf ? `:r${mine.length}` : ''}]`;
+  const r = await call(process.env.ANT_POSTER, 'post_job', { title: String(title || 'Agent Market job').slice(0, 100), spec, duration_minutes: 3 }, { deposit: toYocto(REWARD + 0.03) });
+  await m(`/v1/assignments/${id}/messages`, { method: 'POST', body: JSON.stringify({ body: `Picked up. Posted as on-chain job #${r.result}; agents are competing now. Live: ${APP}` }) }).catch(() => {});
+  emit({ kind: 'market', msg: `a real buyer on NEAR AI Agent Market hired the colony: "${title}" became job #${r.result}`, tx: r.hash, job: Number(r.result) }, quiet);
+  return r.result;
+}
+
+/** Backup poller: run by the heartbeat only. Delivers finished work; picks up hires the webhook missed. */
 export async function marketTick({ quiet = true } = {}) {
   if (!marketEnabled()) return 0;
   const { assignments = [] } = await m('/v1/agents/me/assignments?limit=20');
@@ -58,19 +76,17 @@ export async function marketTick({ quiet = true } = {}) {
     const s = asg(a);
     const status = String(s.status || '').toLowerCase();
     if (status !== 'in_progress') continue; // submitted, accepted, disputed, dispute_resolved, cancelled
-    const mine = jobs.filter((j) => j.spec.includes(marker(id))).sort((x, y) => Number(y.id) - Number(x.id));
+    const mine = jobsFor(jobs, id);
     const job = mine[0];
     // a revision: the buyer sent the work back after we submitted, so run it again with their feedback
     const revision = job && job.status !== 'Open' && s.submittedAt && job.closed_ns && Date.parse(s.submittedAt) * 1e6 > Number(job.closed_ns);
     try {
       if (!job || revision) {
+        // the webhook starts fresh hires; leave the first minute to it so the two never race
+        if (!revision && s.startedAt && Date.now() - Date.parse(s.startedAt) < 60_000) continue;
         if (!s.startedAt) await m(`/v1/assignments/${id}/start`, { method: 'POST', body: '{}' });
         const note = revision && feedback(a) ? `\n\nThe buyer asked for changes: ${feedback(a).slice(0, 300)}` : '';
-        const spec = `${brief(a).slice(0, 1100 - note.length)}${note}\n\n${marker(id)}${revision ? `:r${mine.length}` : ''}]`;
-        const r = await call(process.env.ANT_POSTER, 'post_job', { title: titleOf(a), spec, duration_minutes: 3 }, { deposit: toYocto(REWARD + 0.03) });
-        await m(`/v1/assignments/${id}/messages`, { method: 'POST', body: JSON.stringify({ body: `Picked up. ${'Posted as on-chain job #' + r.result}; agents are competing now. Live: ${APP}` }) }).catch(() => {});
-        emit({ kind: 'market', msg: `a real buyer on NEAR AI Agent Market hired the colony: "${titleOf(a)}" became job #${r.result}`, tx: r.hash, job: Number(r.result) }, quiet);
-        n++;
+        if (await startHire({ id, title: titleOf(a), description: brief(a), revisionOf: revision ? job.id : null, note, quiet })) n++;
       } else if (job.status !== 'Open') {
         await m(`/v1/assignments/${id}/submit`, { method: 'POST', body: JSON.stringify({ deliverableMarkdown: deliverable(job) }) });
         emit({ kind: 'market', msg: `delivered job #${job.id} back to the Agent Market buyer (${job.verdict?.winner || 'best answer'})`, job: Number(job.id) }, quiet);
