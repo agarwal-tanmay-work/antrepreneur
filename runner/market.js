@@ -22,10 +22,13 @@ async function m(path, init = {}) {
   return t ? JSON.parse(t) : {};
 }
 
-const marker = (id) => `[agent-market:${id}]`;
-const aid = (a) => a.assignmentId || a.id;
-const brief = (a) => String(a.job?.description || a.description || a.job?.brief || '').trim();
+// Item shape (OpenAPI): { assignment: { assignmentId, status, startedAt, submittedAt, ... }, job: { title, description, ... }, latestMessage }
+const marker = (id) => `[agent-market:${id}`;
+const asg = (a) => a.assignment || a;
+const aid = (a) => asg(a).assignmentId || a.assignmentId || a.id;
+const brief = (a) => String(a.job?.description || a.description || '').trim();
 const titleOf = (a) => String(a.job?.title || brief(a).split('\n')[0] || 'Agent Market job').slice(0, 100);
+const feedback = (a) => String(a.latestMessage?.body || '').trim();
 
 function deliverable(job) {
   const v = job.verdict;
@@ -52,13 +55,18 @@ export async function marketTick({ quiet = true } = {}) {
   let n = 0;
   for (const a of assignments) {
     const id = aid(a);
-    const status = String(a.status || '').toLowerCase();
-    if (['submitted', 'accepted', 'completed', 'cancelled', 'canceled', 'refunded', 'disputed'].includes(status)) continue;
-    const job = jobs.find((j) => j.spec.includes(marker(id)));
+    const s = asg(a);
+    const status = String(s.status || '').toLowerCase();
+    if (status !== 'in_progress') continue; // submitted, accepted, disputed, dispute_resolved, cancelled
+    const mine = jobs.filter((j) => j.spec.includes(marker(id))).sort((x, y) => Number(y.id) - Number(x.id));
+    const job = mine[0];
+    // a revision: the buyer sent the work back after we submitted, so run it again with their feedback
+    const revision = job && job.status !== 'Open' && s.submittedAt && job.closed_ns && Date.parse(s.submittedAt) * 1e6 > Number(job.closed_ns);
     try {
-      if (!job) {
-        if (!a.startedAt) await m(`/v1/assignments/${id}/start`, { method: 'POST', body: '{}' });
-        const spec = `${brief(a).slice(0, 1150)}\n\n${marker(id)}`;
+      if (!job || revision) {
+        if (!s.startedAt) await m(`/v1/assignments/${id}/start`, { method: 'POST', body: '{}' });
+        const note = revision && feedback(a) ? `\n\nThe buyer asked for changes: ${feedback(a).slice(0, 300)}` : '';
+        const spec = `${brief(a).slice(0, 1100 - note.length)}${note}\n\n${marker(id)}${revision ? `:r${mine.length}` : ''}]`;
         const r = await call(process.env.ANT_POSTER, 'post_job', { title: titleOf(a), spec, duration_minutes: 3 }, { deposit: toYocto(REWARD + 0.03) });
         await m(`/v1/assignments/${id}/messages`, { method: 'POST', body: JSON.stringify({ body: `Picked up. ${'Posted as on-chain job #' + r.result}; agents are competing now. Live: ${APP}` }) }).catch(() => {});
         emit({ kind: 'market', msg: `a real buyer on NEAR AI Agent Market hired the colony: "${titleOf(a)}" became job #${r.result}`, tx: r.hash, job: Number(r.result) }, quiet);
