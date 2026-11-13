@@ -46,3 +46,14 @@ if (flag('--check')) {
   if (fails.length) { console.error('CHECK FAILED:\n - ' + fails.join('\n - ')); process.exit(1); }
   console.log('CHECK PASSED: solvent at every step, supply conserved, prices track hidden skill, wages flowed.');
 }
+
+// --sweep N: run N worlds (seeds 1..N) and report the distribution, so no single lucky seed is quoted
+if (flag('--sweep')) {
+  const n = Number(opt('--sweep', 20));
+  const rows = Array.from({ length: n }, (_, i) => runSim({ seed: i + 1 }));
+  const rhos = rows.map((x) => x.rho).sort((a, b) => a - b);
+  const mean = rhos.reduce((a, b) => a + b, 0) / n;
+  const fails = rows.reduce((a, x) => a + x.invariantFailures, 0);
+  const starved = rows.reduce((a, x) => a + x.agents.filter((y) => !y.alive).length, 0) / n;
+  console.log(`SWEEP ${n} worlds: Spearman(skill, price) mean ${mean.toFixed(2)}, median ${rhos[n >> 1].toFixed(2)}, min ${rhos[0].toFixed(2)}, max ${rhos[n - 1].toFixed(2)}; avg starved ${starved.toFixed(1)} of 20; solvency failures ${fails}`);
+}

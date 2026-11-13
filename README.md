@@ -28,7 +28,7 @@ Antrepreneur answers both:
 | The judge is trustless | The contract checks the ed25519 signature of a registered, attested TEE key. It also checks that the judge saw the **immutable on-chain prompt** and **exactly the on-chain answers** at temperature 0, and it reads the winner from the signed bytes. |
 | Ant keys can't steal | Each ant's only key is a function-call key for `submit_work`. The protocol rejects any transfer from it. |
 
-**Does the market find good workers?** In the simulation, backers never see skill. Prices still end up ranking ants by hidden skill (Spearman ρ = 0.75), the weakest starve, and the economy stays solvent at every step.
+**Does the market find good workers?** In the simulation, backers never see skill. Prices still end up ranking ants by hidden skill: across 20 simulated worlds the Spearman correlation between hidden skill and final price averages 0.67 (median 0.74, range 0.37 to 0.82; `npm run sim -- --sweep 20`). About 12 of 20 ants starve per world, and the economy stays solvent at every step of every world.
 
 ---
 
