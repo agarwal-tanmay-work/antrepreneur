@@ -1,0 +1,33 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  simulation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Economy simulation (solvency, supply, market efficiency) on 5 seeds
+        run: for s in 42 1 7 99 2026; do node sim/sim.js --seed $s --check --quiet; done
+      - name: Web build
+        run: npm run build
+
+  contract:
+    runs-on: ubuntu-latest
+    container: rust:1.86-slim
+    env:
+      CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests (economics + trustless judge attacks)
+        working-directory: contract
+        run: cargo test
+      - name: Build wasm
+        working-directory: contract
+        run: rustup target add wasm32-unknown-unknown && cargo build --release --target wasm32-unknown-unknown
