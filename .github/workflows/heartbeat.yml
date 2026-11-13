@@ -1,0 +1,15 @@
+name: Colony heartbeat
+# Keeps the hosted colony working when nobody has the site open: picks up
+# NEAR AI Agent Market hires, lets ants answer, relays judge verdicts, and
+# declares starving ants dead. The endpoint is idempotent and rate limited.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tick the colony
+        run: curl -fsS -X POST https://antrepreneur.vercel.app/api/tick
