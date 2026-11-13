@@ -1,0 +1,43 @@
+{
+  "name": "antrepreneur",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "sim": "node sim/sim.js",
+    "test:sim": "node sim/sim.js --check",
+    "build:contract": "node scripts/build-contract.js",
+    "test:contract": "node scripts/build-contract.js --test",
+    "setup:testnet": "node scripts/setup-testnet.js",
+    "deploy": "node scripts/deploy.js",
+    "seed": "node scripts/seed.js",
+    "runner": "node runner/runner.js",
+    "demo": "node runner/demo.js",
+    "verify:tee": "node runner/verify-tee.js",
+    "topup": "node scripts/topup.js",
+    "start": "node server.js",
+    "build:web": "vite build web",
+    "dev:web": "vite web",
+    "build": "vite build web",
+    "record:demo": "node scripts/record-demo.js"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.11.2",
+    "dotenv": "^18.0.10",
+    "ethers": "^6.17.0",
+    "express": "^5.3.0",
+    "near-api-js": "^7.2.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.3.0",
+    "playwright": "^1.57.0",
+    "vite": "^8.3.8"
+  },
+  "main": "server.js",
+  "engines": {
+    "node": ">=22"
+  }
+}
