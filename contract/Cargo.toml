@@ -1,0 +1,26 @@
+[package]
+name = "antrepreneur"
+version = "0.1.0"
+edition = "2021"
+# Rust 1.87+ emits wasm features (bulk-memory etc.) the NEAR runtime rejects.
+rust-version = "1.86"
+license = "MIT"
+description = "Antrepreneur: AI workers that run their own business, and a market that decides which ones live"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.6.0"
+
+[dev-dependencies]
+near-sdk = { version = "=5.6.0", features = ["unit-testing"] }
+ed25519-dalek = "2"
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true

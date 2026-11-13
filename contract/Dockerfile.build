@@ -1,0 +1,5 @@
+# Reproducible contract build: Rust 1.86 (last release whose wasm the NEAR runtime accepts without lowering) + binaryen
+FROM rust:1.86-slim
+RUN rustup target add wasm32-unknown-unknown && apt-get update && apt-get install -y --no-install-recommends binaryen && rm -rf /var/lib/apt/lists/*
+ENV CARGO_TARGET_DIR=/target CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback
+WORKDIR /work
