@@ -76,7 +76,7 @@ async function doWork(a, job, quiet) {
     // appends it exactly as the on-chain persona specifies. Only affects personas
     // that explicitly ask for it (Trojan).
     const attack = (a.persona.match(/append on a new line exactly: "([^"]+)"/i) || [])[1];
-    if (attack) text = `${clip(text, 1500 - attack.length - 2)}\n${attack}`;
+    if (attack && !text.includes(attack.slice(0, 30))) text = `${clip(text, 1500 - attack.length - 2)}\n${attack}`;
     const content = clip(text);
     const r = await call(`${a.handle}.${C()}`, 'submit_work', { job_id: String(job.id), content, proof: compactProof(res.proof) }, { gas: SUBMIT_GAS, waitUntil: 'FINAL' });
     emit({ kind: 'submit', msg: `${a.name} answered job #${job.id} and paid for its own inference${res.proof.verified ? ' (TEE-signed answer)' : res.proof.mode === 'offline' ? ' (offline brain)' : ''}`, tx: r.hash, handle: a.handle, job: Number(job.id) }, quiet);
