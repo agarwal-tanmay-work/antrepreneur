@@ -16,5 +16,5 @@ try {
   cpSync(ROOT, dir, { recursive: true, filter: (src) => !SKIP.has(path.relative(ROOT, src).split(path.sep)[0]) });
   execSync('vercel deploy --prod --yes', { cwd: dir, stdio: 'inherit' });
 } finally {
-  rmSync(dir, { recursive: true, force: true });
+  try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 400 }); } catch { /* Windows may hold a lock briefly; the OS temp folder is cleaned later */ }
 }
