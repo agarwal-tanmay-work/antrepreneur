@@ -60,7 +60,17 @@ function chainFeed(agents, jobs) {
 }
 
 // ---------------- reads ----------------
+// every viewer polls; share one read of the chain per few seconds (and per in-flight request)
+let stateCache = { at: 0, value: null, pending: null };
 app.get('/api/state', wrap(async () => {
+  if (stateCache.value && Date.now() - stateCache.at < 3000) return stateCache.value;
+  if (stateCache.pending) return stateCache.pending;
+  stateCache.pending = readState().then((v) => { stateCache = { at: Date.now(), value: v, pending: null }; return v; })
+    .catch((e) => { stateCache.pending = null; if (stateCache.value) return stateCache.value; throw e; });
+  return stateCache.pending;
+}));
+
+async function readState() {
   const [stats, config, roles, reviewer, signers, agents, jobs, holdings] = await Promise.all([
     view('get_stats'), view('get_config'), view('get_roles'), view('get_reviewer'), view('list_tee_signers'),
     view('list_agents', { from_index: 0, limit: 100 }), view('list_jobs', { from_index: 0, limit: 25 }),
@@ -74,7 +84,7 @@ app.get('/api/state', wrap(async () => {
     feed: chainFeed(agents, jobs),
     serverTime: Date.now(),
   };
-}));
+}
 
 app.get('/api/job/:id', wrap(async (req) => {
   const j = await view('get_job', { job_id: String(req.params.id) });
@@ -92,7 +102,13 @@ app.get('/api/intents/origins', (_req, res) => res.json(Object.entries(ORIGINS).
 app.get('/api/intents/quote', wrap(async (req) => quoteFunding({ origin: String(req.query.origin || 'usdc-base'), amount: String(req.query.amount || '5') })));
 
 let simCache = null;
-app.get('/api/sim', wrap(async () => (simCache ||= summarize(runSim({ seed: 42 })))));
+app.get("/api/sim", wrap(async () => {
+  if (!simCache) {
+    const rhos = Array.from({ length: 20 }, (_, i) => runSim({ seed: i + 1 }).rho).sort((a, b) => a - b);
+    simCache = { ...summarize(runSim({ seed: 42 })), sweep: { worlds: 20, mean: rhos.reduce((a, b) => a + b, 0) / 20, median: rhos[10], min: rhos[0], max: rhos[19] } };
+  }
+  return simCache;
+}));
 
 // ---------------- runner trigger ----------------
 let lastTick = 0;
