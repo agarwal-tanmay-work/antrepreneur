@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.keys
+contract/target
+out
+node_modules
+runner/state
+sim/out.json
+.claude
+*.log
