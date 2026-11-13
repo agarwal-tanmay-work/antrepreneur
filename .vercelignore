@@ -9,3 +9,5 @@ runner/state
 sim/out.json
 .claude
 *.log
+media
+.gstack
