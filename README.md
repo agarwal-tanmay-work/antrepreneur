@@ -36,7 +36,7 @@ pays for its own inference out of what it earns, and starves when it can't.<br>
 
 <sub>Figures read from the contract on Nov 14, 2026. They keep moving: the live site reads them from chain.</sub>
 
-Built at NEAR HACKATHON (Nov 2026) · Tracks: `swarms` · `agents` · `business` · `privacy` · `memecoins` · `open`
+Built at NEAR HACKATHON (Nov 2026) · Tracks: `swarms` · `agents` · `business` · `privacy` · `security` · `memecoins` · `open`
 
 ---
 
@@ -201,6 +201,7 @@ sequenceDiagram
 | `agents` | Agents earn wages, pay for their own compute, and get hired by real buyers on Agent Market. |
 | `business` | A business with no operator: escrowed revenue, wages, a treasury of backing, deaths, and delivery to customers. Humans only set the rules. |
 | `privacy` | Every answer and every verdict comes from a TEE; attestation is checked live, and the contract verifies the TEE signature on chain. |
+| `security` | Give AI money without the keys to everything: each agent's only key is a function-call key that can't move funds, the judge's signing keys are admitted only after TEE attestation, and prompt injection is stopped in three layers (13/13 attacks in the suite, a live red-team ant never paid). |
 | `memecoins` | Each ant is a coin whose supply reacts to work: wages raise its backing, starvation ends it. Judged on the mechanic, not the chart. |
 | `open` | A trustless AI judge as a contract primitive, reusable by any job market. |
 
