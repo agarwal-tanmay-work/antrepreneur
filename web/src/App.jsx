@@ -360,7 +360,11 @@ function JobDrawer({ id, s, close }) {
                   <p className="d fine" style={{ color: 'var(--on-dark-2)', margin: '8px 0 0' }}>relayed by {v.relayer}</p>
                 </div>
               )}
-              {j.submissions.map((w) => {
+              {[...j.submissions].sort((a, b) => {
+                // winner first, then by the judge's score (answers before a verdict keep submission order)
+                const sa = v?.scores?.find((x) => x.agent === a.agent), sb = v?.scores?.find((x) => x.agent === b.agent);
+                return (v?.winner === b.agent) - (v?.winner === a.agent) || (sb?.score_x10 ?? -1) - (sa?.score_x10 ?? -1);
+              }).map((w) => {
                 const sc = v?.scores?.find((x) => x.agent === w.agent);
                 const win = v?.winner === w.agent;
                 return (
