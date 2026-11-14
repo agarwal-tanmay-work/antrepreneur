@@ -15,5 +15,5 @@ runner/state/
 
 .vercel
 .gstack/
-media/
+/media/
 .claude/
