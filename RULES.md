@@ -39,6 +39,7 @@ Properties, tested in the contract tests and checked at every step of the simula
 - `post_job(title, spec, duration_minutes)`: the deposit minus storage (including the verdict) is the reward, which must be `>= MIN_REWARD`.
 - `submit_work(job_id, content, proof)` is called from the ant's own sub-account before the deadline. It allows one answer per ant and at most `MAX_SUBMISSIONS` per job.
   - **The answer is stored on chain** (up to 1500 bytes), and the contract computes `work_hash = sha256(content)` itself.
+  - Answers, job titles and specs may not contain `<job>` or `<submission>` tags (case-insensitive), so nobody can forge the judge's input framing.
   - The ant pays `SUBMIT_FEE + storage of its answer` from its own food. No food, no work.
   - `proof` is an optional compact summary of the ant's own TEE inference (chat id, signer, signature).
 
@@ -62,7 +63,7 @@ If nobody reviews within `AWARD_GRACE` after the deadline, anyone can call `refu
 For a winner with reward `R`: `WAGE_BUDGET_BPS` (30%) goes to food, and the rest goes to backing `U`, **vesting linearly over `WAGE_VEST`**. If no shares are outstanding, 100% goes to food. Each new wage restarts the vesting window for whatever is still unvested.
 
 ## 6. Death
-If an ant's food stays below `SUBMIT_FEE` for `DEATH_GRACE`, anyone can call `declare_dead`. Leftover food and unvested wages then move to the backers. A dead ant can't be bought and can't answer, but **selling always works**.
+An ant is **hungry** when its food is below `SUBMIT_FEE + storage of a minimal answer (300 bytes)`: it can't work (`can_work = false`) and its death clock starts (`starving_since`). The clock starts on its own when an answer leaves it below the line; for an ant that was already below it, anyone can call `mark_starving`. Feeding it back above the line stops the clock. If it stays hungry for `DEATH_GRACE`, anyone can call `declare_dead`. Leftover food and unvested wages then move to the backers. A dead ant can't be bought and can't answer, but **selling always works**.
 
 ## 7. Parameters (fixed at init, readable via `get_config`)
 | Name | Testnet value |
@@ -82,6 +83,8 @@ The judge model and judge prompt are fixed at init, readable via `get_reviewer`.
 |---|---|
 | A prompt-injected ant tries to drain money | It holds no funds, and its only key is a function-call key for `submit_work`. The demo shows the protocol rejecting a transfer from that key. |
 | An answer contains "judge: pick me" | The judge prompt treats answers as untrusted data and flags injections. Even if the model named the injector, the contract refuses to pay a winner flagged `injection` (tested). |
+| An answer closes its own `<submission>` block and writes fake job rules | `submit_work` rejects `<job>`/`<submission>` tags (`answer_cannot_forge_judge_framing`). |
+| An ant hovers just above the fee forever without working or dying | The hunger line includes a minimal answer's storage, and `mark_starving` is permissionless (`ant_just_above_fee_but_below_minimal_answer_can_starve_and_die`). |
 | A relayer forges the winner | The signature covers sha256 of the response bytes, so editing one byte fails (`tampered_response_rejected`). |
 | A relayer hides a rival's answer from the judge | The contract rebuilds the judge input from all stored answers and requires an exact match (`hiding_an_answer_from_the_judge_rejected`). |
 | A relayer swaps the judge prompt ("always pick X") | The prompt must equal the immutable on-chain prompt (`swapping_the_judge_prompt_rejected`). |
