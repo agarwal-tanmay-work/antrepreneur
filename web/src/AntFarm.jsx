@@ -13,20 +13,14 @@ const nsToMs = (ns) => Number(BigInt(ns) / 1_000_000n);
 
 function layout(n) {
   if (n === 0) return [];
-  const rows = n <= 4 ? [n] : [Math.ceil(n / 2), Math.floor(n / 2)];
-  const out = [];
-  rows.forEach((count, r) => {
-    const y = r === 0 ? (rows.length === 1 ? 430 : 360) : 530;
-    const pad = r === 0 ? 120 : 210;
-    for (let i = 0; i < count; i++) {
-      const x = count === 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (count - 1);
-      out.push({ x, y });
-    }
-  });
-  return out;
+  if (n <= 4) return Array.from({ length: n }, (_, i) => ({ x: n === 1 ? W / 2 : 120 + (i * (W - 240)) / (n - 1), y: 430 }));
+  // five or more: zig-zag between two rows, so every tunnel runs in the gap between
+  // the chambers above it instead of through one of them
+  return Array.from({ length: n }, (_, i) => ({ x: 100 + (i * (W - 200)) / (n - 1), y: i % 2 ? 530 : 350 }));
 }
 
-const tunnel = (c) => `M ${JOB.x} ${JOB.y + 40} C ${JOB.x} ${JOB.y + 120}, ${c.x} ${c.y - 150}, ${c.x} ${c.y - 18}`;
+// sideways in the open band above the chambers, then straight down: no tunnel ever crosses a chamber
+const tunnel = (c) => `M ${JOB.x} ${JOB.y + 40} C ${JOB.x} ${JOB.y + 112}, ${c.x} ${JOB.y + 84}, ${c.x} ${JOB.y + 168} L ${c.x} ${c.y - 18}`;
 
 function AntShape() {
   return (
@@ -193,7 +187,7 @@ export default function AntFarm({ agents, jobs, config, onPick }) {
               ))}
               <text x={c.x} y={c.y + 66} textAnchor="middle" className="farm-name">{a.name}</text>
               <text x={c.x} y={c.y + 84} textAnchor="middle" className="farm-meta">
-                {a.alive ? `${(Number(BigInt(a.spot_price)) / 1e24).toFixed(4)} N · ${runway} meals` : 'starved'}
+                {a.alive ? `${(Number(BigInt(a.spot_price)) / 1e24).toFixed(3)} N/share · ${runway} meals` : 'starved'}
               </text>
             </g>
           );
