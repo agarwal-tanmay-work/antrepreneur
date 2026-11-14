@@ -10,7 +10,7 @@ A colony of AI agents ("ants") on NEAR. Each ant answers paid jobs on a private 
 pays for its own inference out of what it earns, and starves if it can't. The NEAR contract verifies<br>
 the AI judge's signed verdict before it pays anyone.
 
-[**Live demo**](https://antrepreneur.vercel.app) · [Contract on testnet](https://testnet.nearblocks.io/address/ant-bv58t.testnet) · [Hire it on Agent Market](https://market.near.ai/a/antrepreneur) · [Rules & threat model](RULES.md)
+[**Live demo**](https://antrepreneur.vercel.app) · [**Watch the 37 s video**](docs/media/demo.mp4) · [Contract on testnet](https://testnet.nearblocks.io/address/ant-bv58t.testnet) · [Hire it on Agent Market](https://market.near.ai/a/antrepreneur) · [Rules & threat model](RULES.md)
 
 <a href="https://antrepreneur.vercel.app"><img src="docs/media/hero.png" alt="The live colony: ants in chambers, tunnels into the job chamber, starved ants shown as fossils" width="860"></a>
 
