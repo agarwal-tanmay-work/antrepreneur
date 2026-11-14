@@ -39,9 +39,36 @@ app.post('/api/market/webhook', express.raw({ type: '*/*', limit: '256kb' }), (r
   const event = String(req.get('x-market-event') || body.event || body.type || '');
   const d = body.data || body;
   if (event === 'hire.created' && (d.assignment_id || d.assignmentId)) {
-    bg(import('./runner/market.js').then(({ startHire }) => startHire({ id: d.assignment_id || d.assignmentId, title: d.title, description: d.description, quiet: true })));
+    const id = String(d.assignment_id || d.assignmentId);
+    bg(import('./runner/market.js').then(async ({ startHire }) => {
+      await startHire({ id, title: d.title, description: d.description, quiet: true });
+      await drive(req, id, 1);
+    }));
   }
   res.json({ ok: true, event });
+});
+
+// Each hire drives itself to delivery: tick for up to ~4 minutes, then hand over to a fresh
+// invocation (signed with the webhook secret) until the buyer has the answer. No cron needed.
+const driveSig = (id, hop, ts) => createHmac('sha256', process.env.MARKET_WEBHOOK_SECRET || '').update(`drive:${id}:${hop}:${ts}`).digest('hex');
+async function drive(req, id, hop) {
+  const { driveHire } = await import('./runner/market.js');
+  if (await driveHire(id, { budgetMs: IS_VERCEL ? 240_000 : 600_000 }) || hop >= 6 || !IS_VERCEL) return;
+  const ts = String(Math.floor(Date.now() / 1000));
+  await fetch(`https://${req.get('host')}/api/market/drive`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-drive-ts': ts, 'x-drive-sig': driveSig(id, hop + 1, ts) },
+    body: JSON.stringify({ id, hop: hop + 1 }),
+  }).catch((e) => console.error('drive handoff:', e.message));
+}
+app.post('/api/market/drive', express.json({ limit: '4kb' }), (req, res) => {
+  const { id, hop } = req.body || {};
+  const ts = String(req.get('x-drive-ts') || '');
+  const sig = Buffer.from(String(req.get('x-drive-sig') || ''), 'utf8');
+  const want = Buffer.from(driveSig(String(id), Number(hop), ts), 'utf8');
+  const fresh = /^\d+$/.test(ts) && Math.abs(Date.now() / 1000 - Number(ts)) < 120;
+  if (!process.env.MARKET_WEBHOOK_SECRET || !id || !fresh || sig.length !== want.length || !timingSafeEqual(sig, want)) return res.status(401).json({ error: 'unauthorized' });
+  bg(drive(req, String(id), Number(hop)));
+  res.json({ ok: true, hop });
 });
 
 app.use(express.json({ limit: '32kb' }));
@@ -123,7 +150,9 @@ app.get('/api/job/:id', wrap(async (req) => {
 }));
 
 app.get('/api/attest', wrap(async (req) => {
-  const models = req.query.model ? [String(req.query.model)] : [...new Set([REVIEWER_MODEL, ...Object.values(BRAINS)])];
+  const known = [...new Set([REVIEWER_MODEL, ...Object.values(BRAINS)])];
+  const models = req.query.model ? known.filter((m) => m === String(req.query.model)) : known;
+  if (!models.length) throw new Error('unknown model');
   return Promise.all(models.map((m) => attest(m).catch((e) => ({ model: m, verified: false, checks: [{ name: 'attestation fetch', ok: false, detail: e.message }] }))));
 }));
 
@@ -143,8 +172,8 @@ app.get("/api/sim", wrap(async () => {
 // ---------------- runner trigger ----------------
 let lastTick = 0;
 app.post('/api/tick', wrap(async (req) => {
-  const market = req.query.market === '1'; // only the GitHub heartbeat polls the market
-  if (!market && Date.now() - lastTick < 8000) return { skipped: true };
+  const market = req.query.market === '1'; // backup market poll (hires normally drive themselves)
+  if (Date.now() - lastTick < 8000) return { skipped: true };
   lastTick = Date.now();
   bg(tick({ quiet: true, market }));
   return { started: true };
@@ -188,6 +217,9 @@ app.post('/api/demo/job', wrap(async (req) => {
   const reward = Math.max(0.06, Math.min(0.5, Number(req.body.reward) || 0.15));
   const minutes = Math.max(2, Math.min(10, Number(req.body.minutes) || 2));
   if (!title) throw new Error('title required');
+  // colony-wide cap (stateless: read from chain), so nobody can drain the shared demo key or credits
+  const open = (await view('list_jobs', { from_index: 0, limit: 30 })).filter((j) => j.status === 'Open').length;
+  if (open >= 3) throw new Error('3 jobs are already running: watch them finish, then post yours');
   const r = await call(DEMO, 'post_job', { title, spec, duration_minutes: minutes }, { deposit: toYocto(reward + 0.03) });
   lastTick = Date.now();
   bg(tick({ quiet: true }));
@@ -201,6 +233,9 @@ app.post('/api/demo/spawn', wrap(async (req) => {
   const persona = String(req.body.persona || '').trim().slice(0, 800);
   if (persona.length < 20) throw new Error('persona: at least 20 characters');
   const name = String(req.body.name || handle).slice(0, 48);
+  if (!/^[a-z0-9](?:-?[a-z0-9]){1,23}$/.test(handle)) throw new Error('handle: 2-24 lowercase letters or digits, single hyphens');
+  const alive = (await view('list_agents', { from_index: 0, limit: 100 })).filter((x) => x.alive).length;
+  if (alive >= 24) throw new Error('the colony is full: 24 living ants');
   const a = await spawn({ handle, name, persona, skills: [`brain:${brain}`, 'community'] }, { deposit: 0.3, from: DEMO, quiet: true });
   return { agent: a };
 }));

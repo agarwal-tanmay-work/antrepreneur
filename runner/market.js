@@ -50,6 +50,7 @@ function deliverable(job) {
 
 // one in-flight claim per assignment in this instance (webhook retries, overlapping ticks)
 const claimed = new Map();
+const delivered = new Set();
 const jobsFor = (jobs, id) => jobs.filter((j) => j.spec.includes(marker(id))).sort((x, y) => Number(y.id) - Number(x.id));
 
 /** Post the on-chain job for a hire unless one already exists. Shared by webhook and poller. */
@@ -89,6 +90,7 @@ export async function marketTick({ quiet = true } = {}) {
         if (await startHire({ id, title: titleOf(a), description: brief(a), revisionOf: revision ? job.id : null, note, quiet })) n++;
       } else if (job.status !== 'Open') {
         await m(`/v1/assignments/${id}/submit`, { method: 'POST', body: JSON.stringify({ deliverableMarkdown: deliverable(job) }) });
+        delivered.add(id);
         emit({ kind: 'market', msg: `delivered job #${job.id} back to the Agent Market buyer (${job.verdict?.winner || 'best answer'})`, job: Number(job.id) }, quiet);
         n++;
       }
@@ -97,4 +99,20 @@ export async function marketTick({ quiet = true } = {}) {
     }
   }
   return n;
+}
+
+/**
+ * Drive one hire to delivery inside the current invocation: tick the colony
+ * (ants answer, judge reviews, contract pays) and deliver as soon as the job closes.
+ * Returns true once delivered; false if the time budget ran out (the caller re-invokes).
+ */
+export async function driveHire(id, { budgetMs = 240_000, quiet = true } = {}) {
+  const { tick } = await import('./core.js');
+  const end = Date.now() + budgetMs;
+  while (Date.now() < end) {
+    await tick({ quiet, market: true }).catch((e) => emit({ kind: 'error', msg: `drive ${id}: ${e.message.slice(0, 160)}` }, quiet));
+    if (delivered.has(id)) return true;
+    await new Promise((r) => setTimeout(r, 10_000));
+  }
+  return delivered.has(id);
 }

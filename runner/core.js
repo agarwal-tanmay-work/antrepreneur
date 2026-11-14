@@ -223,7 +223,8 @@ export async function keeperTick({ quiet = false, agents } = {}) {
 
 let ticking = null;
 export async function tick(opts = {}) {
-  if (ticking) return ticking;
+  // a market tick must not be swallowed by an in-flight plain tick: run right after it
+  if (ticking) return opts.market ? ticking.catch(() => {}).then(() => tick(opts)) : ticking;
   ticking = (async () => {
     const [jobs, agents] = await Promise.all([view('list_jobs', { from_index: 0, limit: 30 }), view('list_agents', { from_index: 0, limit: 100 })]);
     if (opts.market && process.env.MARKET_TOKEN) { // only the heartbeat polls the market (no racing pollers)
