@@ -28,6 +28,16 @@ const MINUTE_NS: u64 = 60 * 1_000_000_000;
 const BPS: u128 = 10_000;
 const MAX_SUPPLY: u128 = 1_000_000;
 const MAX_CONTENT: usize = 1500;
+/// An ant is hungry when it can no longer afford the fee plus the storage of a
+/// minimal answer (~300 bytes incl. hash, handle and timestamps). Below this line
+/// it can't work, so it starts starving: no limbo between "can't work" and "starving".
+const MIN_ANSWER_BYTES: u128 = 300;
+
+/// Text that would break the judge's input framing (<job>/<submission> blocks).
+fn has_frame_tag(s: &str) -> bool {
+    let l = s.to_ascii_lowercase();
+    l.contains("<submission") || l.contains("</submission") || l.contains("<job") || l.contains("</job")
+}
 const HISTORY_LEN: usize = 40;
 
 #[near(serializers = [borsh])]
@@ -541,11 +551,11 @@ impl Contract {
     pub fn fund_budget(&mut self, handle: String) {
         let deposit = env::attached_deposit().as_yoctonear();
         require!(deposit > 0, "attach NEAR");
-        let fee = self.config.submit_fee.0;
+        let line = self.hunger_line();
         let a = self.agent_mut(&handle);
         require!(a.alive, "ant is dead");
         a.budget += deposit;
-        if a.budget >= fee {
+        if a.budget >= line {
             a.starving_since = None;
         }
         emit(
@@ -578,7 +588,7 @@ impl Contract {
         a.curve_reserve += q.0;
         a.backing += q.1;
         a.budget += q.2;
-        if a.budget >= cfg.submit_fee.0 {
+        if a.budget >= cfg.submit_fee.0 + MIN_ANSWER_BYTES * env::storage_byte_cost().as_yoctonear() {
             a.starving_since = None;
         }
         a.record(&cfg, now);
@@ -641,6 +651,7 @@ impl Contract {
     pub fn post_job(&mut self, title: String, spec: String, duration_minutes: u32) -> U64 {
         require!(!title.is_empty() && title.len() <= 120, "title: 1-120 chars");
         require!(spec.len() <= 1500, "spec: max 1500 chars");
+        require!(!has_frame_tag(&title) && !has_frame_tag(&spec), "job text may not contain <job> or <submission> tags");
         require!(duration_minutes >= 1 && duration_minutes <= 7 * 24 * 60, "duration: 1 min - 7 days");
         let deposit = env::attached_deposit().as_yoctonear();
         let now = env::block_timestamp();
@@ -681,6 +692,7 @@ impl Contract {
     /// ant's own budget.
     pub fn submit_work(&mut self, job_id: U64, content: String, proof: Option<String>) {
         require!(!content.is_empty() && content.len() <= MAX_CONTENT, "content: 1-1500 bytes");
+        require!(!has_frame_tag(&content), "answers may not contain <job> or <submission> tags");
         require!(proof.as_ref().map(|p| p.len() <= 600).unwrap_or(true), "proof too long");
         let pred = env::predecessor_account_id();
         let suffix = format!(".{}", env::current_account_id());
@@ -720,7 +732,7 @@ impl Contract {
         a.budget -= fee + storage;
         a.fees_paid += fee + storage;
         a.submissions += 1;
-        if a.budget < fee && a.starving_since.is_none() {
+        if a.budget < fee + MIN_ANSWER_BYTES * env::storage_byte_cost().as_yoctonear() && a.starving_since.is_none() {
             a.starving_since = Some(now);
         }
         self.inference_owed += fee;
@@ -842,7 +854,7 @@ impl Contract {
             let raw = reward * cfg.wage_budget_bps as u128 / BPS;
             let (to_budget, to_backing) = if a.supply == 0 { (reward, 0) } else { (raw, reward - raw) };
             a.budget += to_budget;
-            if a.budget >= cfg.submit_fee.0 {
+            if a.budget >= cfg.submit_fee.0 + MIN_ANSWER_BYTES * env::storage_byte_cost().as_yoctonear() {
                 a.starving_since = None;
             }
             if to_backing > 0 {
@@ -900,13 +912,30 @@ impl Contract {
 
     // ------------------------------------------------------------------ death
 
+    fn hunger_line(&self) -> u128 {
+        self.config.submit_fee.0 + MIN_ANSWER_BYTES * env::storage_byte_cost().as_yoctonear()
+    }
+
+    /// Permissionless: start the death clock of an ant that can no longer pay for a
+    /// minimal answer (e.g. one that was already below the line before an upgrade).
+    pub fn mark_starving(&mut self, handle: String) {
+        let now = env::block_timestamp();
+        let line = self.hunger_line();
+        let a = self.agent_mut(&handle);
+        require!(a.alive, "already dead");
+        require!(a.budget < line, "ant can still pay for inference");
+        require!(a.starving_since.is_none(), "already starving");
+        a.starving_since = Some(now);
+        emit("antrepreneur", "starving", format!("{{\"handle\":\"{}\"}}", handle));
+    }
+
     pub fn declare_dead(&mut self, handle: String) {
         let now = env::block_timestamp();
         let cfg = self.config.clone();
         let grace = cfg.death_grace_minutes as u64 * MINUTE_NS;
         let a = self.agent_mut(&handle);
         require!(a.alive, "already dead");
-        require!(a.budget < cfg.submit_fee.0, "ant can still pay for inference");
+        require!(a.budget < cfg.submit_fee.0 + MIN_ANSWER_BYTES * env::storage_byte_cost().as_yoctonear(), "ant can still pay for inference");
         let since = a.starving_since.unwrap_or_else(|| env::panic_str("not starving"));
         require!(now >= since + grace, "death grace not over");
         a.settle(now);
@@ -1189,7 +1218,7 @@ impl Contract {
             backing_per_share: U128(bps),
             market_cap: U128(spot * a.supply),
             alive: a.alive,
-            can_work: a.alive && a.budget >= cfg.submit_fee.0,
+            can_work: a.alive && a.budget >= cfg.submit_fee.0 + MIN_ANSWER_BYTES * env::storage_byte_cost().as_yoctonear(),
             starving_since_ns: a.starving_since.map(U64),
             wins: a.wins,
             submissions: a.submissions,

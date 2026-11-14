@@ -213,6 +213,14 @@ export async function keeperTick({ quiet = false, agents } = {}) {
   const nowNs = BigInt(Date.now()) * 1_000_000n;
   const grace = BigInt(cfg.death_grace_minutes) * 60_000_000_000n;
   for (const a of agents) {
+    // can't afford a minimal answer but the death clock never started (e.g. fell below the line before an upgrade)
+    if (a.alive && !a.can_work && !a.starving_since_ns) {
+      try {
+        const r = await call(RELAYER(), 'mark_starving', { handle: a.handle });
+        emit({ kind: 'death', msg: `${a.name} is starving: it can't pay for even a short answer. It dies in ${cfg.death_grace_minutes} minutes unless someone feeds it.`, tx: r.hash, handle: a.handle }, quiet);
+      } catch (e) { emit({ kind: 'error', msg: `mark_starving ${a.handle}: ${e.message.slice(0, 120)}` }, quiet); }
+      continue;
+    }
     if (!a.alive || a.can_work || !a.starving_since_ns || BigInt(a.starving_since_ns) + grace > nowNs) continue;
     try {
       const r = await call(RELAYER(), 'declare_dead', { handle: a.handle });
