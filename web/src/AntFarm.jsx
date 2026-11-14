@@ -187,7 +187,7 @@ export default function AntFarm({ agents, jobs, config, onPick }) {
               ))}
               <text x={c.x} y={c.y + 66} textAnchor="middle" className="farm-name">{a.name}</text>
               <text x={c.x} y={c.y + 84} textAnchor="middle" className="farm-meta">
-                {a.alive ? `${(Number(BigInt(a.spot_price)) / 1e24).toFixed(3)} N/share · ${runway} meals` : 'starved'}
+                {a.alive ? (shown.length > 7 ? `${runway} meals` : `${(Number(BigInt(a.spot_price)) / 1e24).toFixed(3)} N/share · ${runway} meals`) : 'starved'}
               </text>
             </g>
           );
